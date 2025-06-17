@@ -156,7 +156,6 @@ Released 2024-10-01
 - `vkUpdateDescriptorSets()`: Support writing beyond descriptor binding size if subsequent bindings are of same type.
 - Fix rendering issue with render pass that immediately follows a kernel dispatch.
 - Fix occasional GPU crash when a smaller descriptor set replaces a larger one.
-- Fix race condition when `VkImage` destroyed while used by descriptor.
 - Fix crash in `vkCmdPushDescriptorSetWithTemplateKHR()` when entries in 
   `VkDescriptorUpdateTemplateCreateInfo` are not sorted by offset.
 - Fix issue where `vkQueueWaitIdle()` and `vkDeviceWaitIdle()` were not 
