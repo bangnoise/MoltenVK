@@ -13,18 +13,22 @@ Copyright (c) 2015-2025 [The Brenwill Workshop Ltd.](http://www.brenwill.com)
 
 
 
-MoltenVK 1.3.1
+MoltenVK 1.4.0
 ---------------
 
-Released TBD
+Released 2025-07-29
 
+- Add support for _Vulkan 1.4_.
 - Add support for extensions:
+	- `VK_KHR_dynamic_rendering_local_read`
 	- `VK_KHR_global_priority`
 	- `VK_KHR_line_rasterization`
 	- `VK_KHR_maintenance5`
 	- `VK_KHR_maintenance8`
 	- `VK_KHR_present_id`
+	- `VK_KHR_present_id2`
 	- `VK_KHR_present_wait`
+	- `VK_KHR_present_wait2`
 	- `VK_KHR_shader_float_controls2`
 	- `VK_KHR_shader_maximal_reconvergence`
 	- `VK_KHR_shader_quad_control`
@@ -35,11 +39,30 @@ Released TBD
 - `vkDeviceWaitIdle()` & `vkQueueWaitIdle()` now wait even when `VK_ERROR_DEVICE_LOST` error is encountered.
 - For behaviouraly consistency, require deprecated unofficial extension `VK_MVK_moltenvk` be enabled to access 
   the proc addrs for functions `vkSetMoltenVKConfigurationMVK()` and `vkGetPhysicalDeviceMetalFeaturesMVK()`. 
+- Fix missed supported usage in image format properties checks.
+- Fix high latency on present wait.
+- Fix shader cache misses within pipeline cache.
+- Fix misalignment between pipeline pixel formats and dynamic rendering attachments.
+- Enable `shaderRoundingModeRTEFloat16/32`.
 - Move `vkGetPhysicalDeviceMetalFeaturesMVK()` from `mvk_private_api.h` to `mvk_deprecated_api.h`.
+- Re-expose proc addr for deprecated `VK_MVK_moltenvk` extension functions.
+- Add the AMD Radeon PRO W6800X as a device with 32-wide SIMD-groups.
+- Apple, AMD, and Intel devices use parallelograms for lines.
+- Fix counter set memory leak on workaround to AMD RDNA devices
 - Update to latest SPIRV-Cross:
   - MSL: Add support for `DebugPrintf`.
   - MSL: Fix crash due to regression caused by recent changes to location calculations.
   - MSL: Add option to provide a default point size.
+  - MSL: Implement clustered subgroup operations for sizes other than 4.
+  - MSL: Fix generation of the `WorkgroupSize` built-in.
+  - MSL: Implement accurate `OpSMod`.
+  - MSL: Don't emit const for BDA pointers.
+  - MSL: Fix loading BDA from `std140` UBO.
+  - MSL: Implement `atomic_thread_fence` for MSL 3.2+.
+  - MSL: Always emit access qualifier when emitting coherency.
+  - MSL: Support SPIR-V Fast Math execution modes and decorations.
+  - MSL: Rethink `add_pragma_line()` and `add_typedef_line()`.
+  - GLSL/MSL: Add support for `SPV_KHR_quad_control`.
 
 
 

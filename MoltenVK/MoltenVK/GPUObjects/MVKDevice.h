@@ -437,6 +437,7 @@ protected:
 	void initProperties();
 	void initLimits();
 	void initGPUInfoProperties();
+	bool isAMDRDNAGPU();
 	void initMemoryProperties();
 	void initVkSemaphoreStyle();
 	void setMemoryHeap(uint32_t heapIndex, VkDeviceSize heapSize, VkMemoryHeapFlags heapFlags);
@@ -457,6 +458,7 @@ protected:
 	void populateDeviceIDProperties(VkPhysicalDeviceVulkan11Properties* pVk11Props);
 	void populateSubgroupProperties(VkPhysicalDeviceVulkan11Properties* pVk11Props);
 	template<typename HostImageCopyProps> void populateHostImageCopyProperties(HostImageCopyProps* pHostImageCopyProps);
+	bool isTier2MetalArgumentBuffers();
 	void logGPUInfo();
 
 	MVKInstance* _mvkInstance;
