@@ -614,7 +614,7 @@ void MVKPhysicalDevice::getFeatures(VkPhysicalDeviceFeatures2* features) {
 				portabilityFeatures->multisampleArrayImage = _metalFeatures.multisampleArrayTextures;
 				portabilityFeatures->mutableComparisonSamplers = _metalFeatures.depthSampleCompare;
 				portabilityFeatures->pointPolygons = false;
-				portabilityFeatures->samplerMipLodBias = getMVKConfig().useMetalPrivateAPI;
+				portabilityFeatures->samplerMipLodBias = _metalFeatures.samplerMipLodBias;
 				portabilityFeatures->separateStencilMaskRef = true;
 				portabilityFeatures->shaderSampleRateInterpolationFunctions = _metalFeatures.pullModelInterpolation;
 				portabilityFeatures->tessellationIsolines = false;
@@ -1499,6 +1499,26 @@ VkResult MVKPhysicalDevice::getImageFormatProperties(VkFormat format,
 		VK_IMAGE_USAGE_HOST_TRANSFER_BIT;
 	if (usage & ~supportedUsageFlags) {
 		return VK_ERROR_FORMAT_NOT_SUPPORTED;
+	}
+
+	// If a feature is not supported, then the corresponding usage should result in VK_ERROR_FORMAT_NOT_SUPPORTED.
+	auto& formatProps = _pixelFormats.getVkFormatProperties3(format);
+	VkFlags64 formatFeatures = tiling == VK_IMAGE_TILING_LINEAR ? formatProps.linearTilingFeatures : formatProps.optimalTilingFeatures;
+	static const std::pair<VkFlags, VkFlags64> usageFeatureCombos[] = {
+		{VK_IMAGE_USAGE_TRANSFER_SRC_BIT, VK_FORMAT_FEATURE_2_TRANSFER_SRC_BIT},
+		{VK_IMAGE_USAGE_TRANSFER_DST_BIT, VK_FORMAT_FEATURE_2_TRANSFER_DST_BIT},
+		{VK_IMAGE_USAGE_SAMPLED_BIT, VK_FORMAT_FEATURE_2_SAMPLED_IMAGE_BIT},
+		{VK_IMAGE_USAGE_STORAGE_BIT, VK_FORMAT_FEATURE_2_STORAGE_IMAGE_BIT},
+		{VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT},
+		{VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_FORMAT_FEATURE_2_DEPTH_STENCIL_ATTACHMENT_BIT},
+		{VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT, VK_FORMAT_FEATURE_2_COLOR_ATTACHMENT_BIT | VK_FORMAT_FEATURE_2_DEPTH_STENCIL_ATTACHMENT_BIT},
+		{VK_IMAGE_USAGE_HOST_TRANSFER_BIT, VK_FORMAT_FEATURE_2_HOST_IMAGE_TRANSFER_BIT},
+	};
+	for (auto combo : usageFeatureCombos) {
+		if (mvkIsAnyFlagEnabled(usage, combo.first) &&
+			!mvkIsAnyFlagEnabled(formatFeatures, combo.second)) {
+			return VK_ERROR_FORMAT_NOT_SUPPORTED;
+		}
 	}
 
 	// Metal does not support creating uncompressed views of compressed formats.
@@ -2418,6 +2438,14 @@ void MVKPhysicalDevice::initMetalFeatures() {
 	_metalFeatures.nativeTextureAtomics = mvkOSVersionIsAtLeast(14.0, 17.0, 1.0) && (supportsMTLGPUFamily(Metal3) || supportsMTLGPUFamily(Apple6) || supportsMTLGPUFamily(Mac2));
 #endif
 
+#if MVK_XCODE_26
+	_metalFeatures.samplerMipLodBias = mvkOSVersionIsAtLeast(26.0);
+#endif
+
+#if MVK_USE_METAL_PRIVATE_API
+	_metalFeatures.samplerMipLodBias = _metalFeatures.samplerMipLodBias || getMVKConfig().useMetalPrivateAPI;
+#endif
+
 	// GPU-specific features
 	switch (_properties.vendorID) {
 		case kAMDVendorId:
@@ -3165,10 +3193,7 @@ void MVKPhysicalDevice::initLimits() {
 
 	_properties.limits.maxImageDimension3D = _metalFeatures.maxTextureLayers;
 	_properties.limits.maxImageArrayLayers = _metalFeatures.maxTextureLayers;
-	// Max sum of API and shader values. Bias not publicly supported in API, but can be applied in the shader directly.
-	// The lack of API value is covered by VkPhysicalDevicePortabilitySubsetFeaturesKHR::samplerMipLodBias.
-	// Metal does not specify a limit for the shader value, so choose something reasonable.
-	_properties.limits.maxSamplerLodBias = 16;
+	_properties.limits.maxSamplerLodBias = 15.999;
 	_properties.limits.maxSamplerAnisotropy = 16;
 
     _properties.limits.maxVertexInputAttributes = 31;
@@ -4291,7 +4316,7 @@ void MVKDevice::getDescriptorVariableDescriptorCountLayoutSupport(const VkDescri
 
 	// If there is enough room for the requested size, indicate the amount available,
 	// otherwise indicate that the requested size cannot be supported.
-	if (requestedCount < maxVarDescCount) {
+	if (requestedCount <= maxVarDescCount) {
 		pVarDescSetCountSupport->maxVariableDescriptorCount = maxVarDescCount;
 	} else {
 		pSupport->supported = false;
