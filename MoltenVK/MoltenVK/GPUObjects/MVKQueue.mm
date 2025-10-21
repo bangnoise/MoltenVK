@@ -166,22 +166,15 @@ VkResult MVKQueue::waitIdle(MVKCommandUse cmdUse) {
 id<MTLCommandBuffer> MVKQueue::getMTLCommandBuffer(MVKCommandUse cmdUse, bool retainRefs) {
 	id<MTLCommandBuffer> mtlCmdBuff = nil;
 	uint64_t startTime = getPerformanceTimestamp();
-#if MVK_XCODE_12
-	if ([_mtlQueue respondsToSelector: @selector(commandBufferWithDescriptor:)]) {
-		MTLCommandBufferDescriptor* mtlCmdBuffDesc = [MTLCommandBufferDescriptor new];	// temp retain
-		mtlCmdBuffDesc.retainedReferences = retainRefs;
-		if (getMVKConfig().debugMode) {
-			mtlCmdBuffDesc.errorOptions |= MTLCommandBufferErrorOptionEncoderExecutionStatus;
-		}
-		mtlCmdBuff = [_mtlQueue commandBufferWithDescriptor: mtlCmdBuffDesc];
-		[mtlCmdBuffDesc release];														// temp release
-	} else
-#endif
-	if (retainRefs) {
-		mtlCmdBuff = [_mtlQueue commandBuffer];
-	} else {
-		mtlCmdBuff = [_mtlQueue commandBufferWithUnretainedReferences];
+
+	MTLCommandBufferDescriptor* mtlCmdBuffDesc = [MTLCommandBufferDescriptor new];	// temp retain
+	mtlCmdBuffDesc.retainedReferences = retainRefs;
+	if (getMVKConfig().debugMode) {
+		mtlCmdBuffDesc.errorOptions |= MTLCommandBufferErrorOptionEncoderExecutionStatus;
 	}
+	mtlCmdBuff = [_mtlQueue commandBufferWithDescriptor: mtlCmdBuffDesc];
+	[mtlCmdBuffDesc release];														// temp release
+
 	addPerformanceInterval(getPerformanceStats().queue.retrieveMTLCommandBuffer, startTime);
 	NSString* mtlCmdBuffLabel = getMTLCommandBufferLabel(cmdUse);
 	setMetalObjectLabel(mtlCmdBuff, mtlCmdBuffLabel);
@@ -213,7 +206,6 @@ NSString* MVKQueue::getMTLCommandBufferLabel(MVKCommandUse cmdUse) {
 #undef CASE_GET_LABEL
 }
 
-#if MVK_XCODE_12
 static const char* mvkStringFromMTLCommandEncoderErrorState(MTLCommandEncoderErrorState errState) {
 	switch (errState) {
 		case MTLCommandEncoderErrorStateUnknown:   return "unknown";
@@ -224,7 +216,6 @@ static const char* mvkStringFromMTLCommandEncoderErrorState(MTLCommandEncoderErr
 	}
 	return "unknown";
 }
-#endif
 
 void MVKQueue::handleMTLCommandBufferError(id<MTLCommandBuffer> mtlCmdBuff) {
 	if (mtlCmdBuff.status != MTLCommandBufferStatusError) { return; }
@@ -249,9 +240,7 @@ void MVKQueue::handleMTLCommandBufferError(id<MTLCommandBuffer> mtlCmdBuff) {
 		case MTLCommandBufferErrorTimeout:
 			vkErr = VK_TIMEOUT;
 			break;
-#if MVK_XCODE_13
 		case MTLCommandBufferErrorStackOverflow:
-#endif
 		case MTLCommandBufferErrorPageFault:
 		case MTLCommandBufferErrorOutOfMemory:
 		default:
@@ -268,32 +257,27 @@ void MVKQueue::handleMTLCommandBufferError(id<MTLCommandBuffer> mtlCmdBuff) {
 				 (mtlCmdBuff.label ? mtlCmdBuff.label.UTF8String : ""),
 				 mtlCmdBuff.error.code, mtlCmdBuff.error.localizedDescription.UTF8String);
 
-#if MVK_XCODE_12
-	if (&MTLCommandBufferEncoderInfoErrorKey != nullptr) {
-		if (NSArray<id<MTLCommandBufferEncoderInfo>>* mtlEncInfo = mtlCmdBuff.error.userInfo[MTLCommandBufferEncoderInfoErrorKey]) {
-			MVKLogInfo("Encoders for %p \"%s\":", mtlCmdBuff, mtlCmdBuff.label ? mtlCmdBuff.label.UTF8String : "");
-			for (id<MTLCommandBufferEncoderInfo> enc in mtlEncInfo) {
-				MVKLogInfo(" - %s: %s", enc.label.UTF8String, mvkStringFromMTLCommandEncoderErrorState(enc.errorState));
-				if (enc.debugSignposts.count > 0) {
-					MVKLogInfo("   Debug signposts:");
-					for (NSString* signpost in enc.debugSignposts) {
-						MVKLogInfo("    - %s", signpost.UTF8String);
-					}
+	if (NSArray<id<MTLCommandBufferEncoderInfo>>* mtlEncInfo = mtlCmdBuff.error.userInfo[MTLCommandBufferEncoderInfoErrorKey]) {
+		MVKLogInfo("Encoders for %p \"%s\":", mtlCmdBuff, mtlCmdBuff.label ? mtlCmdBuff.label.UTF8String : "");
+		for (id<MTLCommandBufferEncoderInfo> enc in mtlEncInfo) {
+			MVKLogInfo(" - %s: %s", enc.label.UTF8String, mvkStringFromMTLCommandEncoderErrorState(enc.errorState));
+			if (enc.debugSignposts.count > 0) {
+				MVKLogInfo("   Debug signposts:");
+				for (NSString* signpost in enc.debugSignposts) {
+					MVKLogInfo("    - %s", signpost.UTF8String);
 				}
 			}
 		}
 	}
-	if ([mtlCmdBuff respondsToSelector: @selector(logs)]) {
-		bool isFirstMsg = true;
-		for (id<MTLFunctionLog> log in mtlCmdBuff.logs) {
-			if (isFirstMsg) {
-				MVKLogInfo("Shader log messages:");
-				isFirstMsg = false;
-			}
-			MVKLogInfo("%s", log.description.UTF8String);
+
+	bool isFirstMsg = true;
+	for (id<MTLFunctionLog> log in mtlCmdBuff.logs) {
+		if (isFirstMsg) {
+			MVKLogInfo("Shader log messages:");
+			isFirstMsg = false;
 		}
+		MVKLogInfo("%s", log.description.UTF8String);
 	}
-#endif
 }
 
 #pragma mark Construction
@@ -501,7 +485,14 @@ VkResult MVKQueueCommandBufferSubmission::execute() {
 // Returns the active MTLCommandBuffer, lazily retrieving it from the queue if needed.
 id<MTLCommandBuffer> MVKQueueCommandBufferSubmission::getActiveMTLCommandBuffer() {
 	if ( !_activeMTLCommandBuffer ) {
-		setActiveMTLCommandBuffer(_queue->getMTLCommandBuffer(_commandUse));
+		bool needsRetain = false;
+		if (!_device->hasResidencySet() && (getEnabledDescriptorIndexingFeatures().descriptorBindingPartiallyBound || getMVKConfig().liveCheckAllResources)) {
+			// Partially bound descriptors will get bound by us even if they're not used at runtime by the shader.
+			// The application is free to destroy them even if they're not used at runtime even if we bound them.
+			// Metal will be very unhappy if we destroy something we bound, even if it isn't used at runtime.
+			needsRetain = true;
+		}
+		setActiveMTLCommandBuffer(_queue->getMTLCommandBuffer(_commandUse, needsRetain));
 	}
 	return _activeMTLCommandBuffer;
 }
@@ -537,7 +528,8 @@ VkResult MVKQueueCommandBufferSubmission::commitActiveMTLCommandBuffer(bool sign
 	// finishes executing, and therefore cannot be used beyond the active MTLCommandBuffer.
 	// By now, it's been submitted to the MTLCommandBuffer, so remove it from the encoding context,
 	// to ensure a fresh one will be used by commands executing on any subsequent MTLCommandBuffers.
-	_encodingContext.visibilityResultBuffer = nullptr;
+	if (_encodingContext.visibilityResultBuffer.buffer())
+		_device->returnVisibilityBuffer(std::move(_encodingContext.visibilityResultBuffer));
 
 	// If this is the last command buffer in the submission, we're losing the context and need synchronize
 	// current barrier fences to the ones at index 0, which will be what the next submision starts with.
